@@ -13,5 +13,6 @@ function translate (text) {
 	document.body.appendChild(script);
 };
 function updateDOM(response) {
-	console.log(response);
+	$("body").append("<p>" + response.text + "</p>")
+	$("#chatText").val("")
 }
