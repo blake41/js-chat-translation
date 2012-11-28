@@ -2,34 +2,72 @@ var express = require('express');
 var http = require('http');
 var app = express();
 
-app.get('/translate', function(req,res) {
+app.get('/translate', function(req,originalRes) {
 	if(req.query.jsonp) {
-		var accessToken = "http%3a%2f%2fschemas.xmlsoap.org%2fws%2f2005%2f05%2fidentity%2fclaims%2fnameidentifier=blakeTranslate&http%3a%2f%2fschemas.microsoft.com%2faccesscontrolservice%2f2010%2f07%2fclaims%2fidentityprovider=https%3a%2f%2fdatamarket.accesscontrol.windows.net%2f&Audience=http%3a%2f%2fapi.microsofttranslator.com&ExpiresOn=1354058211&Issuer=https%3a%2f%2fdatamarket.accesscontrol.windows.net%2f&HMACSHA256=XRHJD7MquLivO0c%2fROv9TWs0IBq8%2b%2f3vh5gSXzuRlOI%3d"
-		var from = encodeURIComponent("en"), 
-			to = encodeURIComponent("es"),
-			toTranslate = encodeURIComponent(req.query.text);
-		
-		var options = {
-		  host: "api.microsofttranslator.com",
-		  path : ["/V2/Ajax.svc/Translate?text=", toTranslate,
-		  				"&from=", from,
-		    			"&to=", to].join(""),
-		  headers : {
-		  	Authorization : "Bearer " + accessToken
-		  }
-		};
+		var toTranslate = req.query.text
+		var request = require('request');
+		var qs = require('querystring');
+		var redis = require("redis");
+		var client = redis.createClient();
 
-		http.get(options, function(response) {
-		  response.on('data', function (chunk) {
-		  	var responseString = (chunk + "")
-		  	var jsonp = req.query.jsonp + "(" + JSON.stringify({text : responseString}) + ")"
-		    res.send(jsonp);
-		 });
-		}).on('error', function(e) {
-		  console.log("Got error: " + e.message);
-		});
+		var postBody = qs.stringify({
+			client_secret : "n0ZNqCAkaGNiiDu11EUH90MXmEs5A4+QQM++RM3U1Wk=",
+			client_id : "blakeTranslate",
+			grant_type : "client_credentials",
+			scope : "http://api.microsofttranslator.com"
+		})
+
+		client.hgetall("token", function(err, reply) {
+			var nowInSeconds = Math.round(Date.now() / 1000),
+				expiresOn = reply.expiresOn,
+				accessToken = reply.accessToken
+			if((expiresOn - nowInSeconds) > 0) {
+				var from = "en",
+							to = "es",
+							path = ["/V2/Ajax.svc/Translate?text=", toTranslate,
+						  				"&from=", from,
+						    			"&to=", to].join(""),
+							uri = "http://api.microsofttranslator.com" + path
+							options = {
+						  	uri: uri,
+						  	headers : {
+						  		Authorization : "Bearer " + accessToken
+						  	}
+							},
+						request.get(options, function(err, res, body) {
+							var jsonpResponse = req.query.jsonp + "(" + JSON.stringify({text : body}) + ")"
+							originalRes.send(jsonpResponse);
+						})
+			}
+			else {
+				request.post({
+					url : "https://datamarket.accesscontrol.windows.net/v2/OAuth2-13",
+					body : postBody,
+					}, function(e, r, body) {
+						var tokenHash = JSON.parse(body);
+						var expiresOn = qs.parse(tokenHash.access_token).ExpiresOn;
+						var accessToken = tokenHash.access_token
+						client.hmset("token", "accessToken", accessToken, "expiresOn", expiresOn )
+						var from = "en",
+									to = "es",
+									path = ["/V2/Ajax.svc/Translate?text=", toTranslate,
+								  				"&from=", from,
+								    			"&to=", to].join(""),
+									uri = "http://api.microsofttranslator.com" + path
+									options = {
+								  	uri: uri,
+								  	headers : {
+								  		Authorization : "Bearer " + accessToken
+								  	}
+									},
+								request.get(options, function(err, res, body) {
+									var jsonpResponse = req.query.jsonp + "(" + JSON.stringify({text : body}) + ")"
+									originalRes.send(jsonpResponse);
+								})
+				})
+			}
+		})
 	}
-});
-
+})
 app.listen(3000);
 console.log("listening on port 3000");

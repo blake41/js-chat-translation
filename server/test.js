@@ -1,26 +1,51 @@
-var http = require('http');
-var accessToken = "http%3a%2f%2fschemas.xmlsoap.org%2fws%2f2005%2f05%2fidentity%2fclaims%2fnameidentifier=blakeTranslate&http%3a%2f%2fschemas.microsoft.com%2faccesscontrolservice%2f2010%2f07%2fclaims%2fidentityprovider=https%3a%2f%2fdatamarket.accesscontrol.windows.net%2f&Audience=http%3a%2f%2fapi.microsofttranslator.com&ExpiresOn=1354058211&Issuer=https%3a%2f%2fdatamarket.accesscontrol.windows.net%2f&HMACSHA256=XRHJD7MquLivO0c%2fROv9TWs0IBq8%2b%2f3vh5gSXzuRlOI%3d"
-	var from = encodeURIComponent("en"), 
-		to = encodeURIComponent("es"),
-		text = encodeURIComponent("hello world");
+var request = require('request');
+var qs = require('querystring');
+var redis = require("redis");
+var client = redis.createClient();
 
-var options = {
-  host: "api.microsofttranslator.com",
-  path : ["/V2/Ajax.svc/Translate?text=", text,
-  				"&from=", from,
-    			"&to=", to].join(""),
-  headers : {
-  	Authorization : "Bearer " + accessToken
-  },
-  method : "GET"
-};
+var postBody = qs.stringify({
+	client_secret : "n0ZNqCAkaGNiiDu11EUH90MXmEs5A4+QQM++RM3U1Wk=",
+	client_id : "blakeTranslate",
+	grant_type : "client_credentials",
+	scope : "http://api.microsofttranslator.com"
+})
 
-var req = http.request(options, function(response) {
-  response.on('data', function (chunk) {
-    console.log('BODY: ' + chunk);
- });
-}).on('error', function(e) {
-  console.log("Got error: " + e.message);
-});
+client.hgetall("token", function(err, reply) {
+	var nowInSeconds = Math.round(Date.now() / 1000),
+		expiresOn = reply.expiresOn,
+		accessToken = reply.accessToken
+	if((expiresOn - nowInSeconds) > 0) {
+		getTranslation(accessToken);
+	}
+	else {
+		request.post({
+			url : "https://datamarket.accesscontrol.windows.net/v2/OAuth2-13",
+			body : postBody,
+		}, function(e, r, body) {
+				var tokenHash = JSON.parse(body);
+				var expiresOn = qs.parse(tokenHash.access_token).ExpiresOn;
+				client.hmset("token", "accessToken", tokenHash.access_token, "expiresOn", expiresOn )
+				getTranslation(accessToken);
+		})
+	}
+})
 
-req.end();
+function getTranslation(accessToken) {
+	var toTranslate = "hello world",
+				from = "en",
+				to = "es",
+				path = ["/V2/Ajax.svc/Translate?text=", toTranslate,
+			  				"&from=", from,
+			    			"&to=", to].join(""),
+				uri = "http://api.microsofttranslator.com" + path
+				options = {
+			  	uri: uri,
+			  	headers : {
+			  		Authorization : "Bearer " + accessToken
+			  	}
+				},
+			request.get(options, function(err, res, body) {
+				console.log(body);
+			})
+}
+
